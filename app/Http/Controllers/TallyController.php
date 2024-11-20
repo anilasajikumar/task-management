@@ -8,106 +8,130 @@ use Exception;
 
 class TallyController extends Controller
 {
-    private $tallyUrl;
-
-    public function __construct()
+    public function showForm()
     {
-        $this->tallyUrl = env('TALLY_SERVER_URL'); // Initialize the Tally URL from .env
+        return view('tally_form');
     }
 
-    public function fetchSalesData()
-    {
-        // XML request to fetch sales data from Tally
-        $xmlRequest = <<<XML
-            <ENVELOPE>
-                <HEADER>
-                    <TALLYREQUEST>Export Data</TALLYREQUEST>
-                </HEADER>
-                <BODY>
-                    <EXPORTDATA>
-                        <REQUESTDESC>
-                            <REPORTNAME>Sales Register</REPORTNAME>
-                            <STATICVARIABLES>
-                                <SVFROMDATE>20240101</SVFROMDATE>
-                                <SVTODATE>20240131</SVTODATE>
-                            </STATICVARIABLES>
-                        </REQUESTDESC>
-                    </EXPORTDATA>
-                </BODY>
-            </ENVELOPE>
-        XML;
+    // Insert entry into Tally
+    public function insertEntry(Request $request)
+    { 
+        $name = $request->input('nm'); // Get ledger name from the form input
+
+        $requestXML = '<?xml version="1.0"?>
+        <ENVELOPE>
+          <HEADER>
+            <TALLYREQUEST>Import Data</TALLYREQUEST>
+          </HEADER>
+          <BODY>
+            <IMPORTDATA>
+              <REQUESTDESC>
+                <REPORTNAME>Vouchers</REPORTNAME>
+                <STATICVARIABLES>
+                  <SVCURRENTCOMPANY>SAVH</SVCURRENTCOMPANY>
+                </STATICVARIABLES>
+              </REQUESTDESC>
+              <REQUESTDATA>
+                <TALLYMESSAGE xmlns:UDF="TallyUDF">
+                  <VOUCHER REMOTEID="123" VCHTYPE="Receipt" VCHKEY="321" ACTION="Create" OBJVIEW="Accounting Voucher View">
+                    <PARTYLEDGERNAME>' . $name . '</PARTYLEDGERNAME>
+                    <DATE>20241119</DATE>
+                    <VOUCHERTYPENAME>Receipt</VOUCHERTYPENAME>
+                    <VOUCHERNUMBER>1</VOUCHERNUMBER>
+                    <ALLLEDGERENTRIES.LIST>
+                      <LEDGERNAME>' . $name . '</LEDGERNAME>
+                      <AMOUNT>200000.00</AMOUNT>
+                    </ALLLEDGERENTRIES.LIST>
+                    <ALLLEDGERENTRIES.LIST>
+                      <LEDGERNAME>Bank of Maharashtra</LEDGERNAME>
+                      <AMOUNT>-200000.00</AMOUNT>
+                    </ALLLEDGERENTRIES.LIST>
+                  </VOUCHER>
+                </TALLYMESSAGE>
+              </REQUESTDATA>
+            </IMPORTDATA>
+          </BODY>
+        </ENVELOPE>';
+
+        $server = 'http://localhost:9000';
+        $headers = [
+            "Content-type: text/xml",
+            "Content-length: " . strlen($requestXML),
+            "Connection: close"
+        ];
 
         try {
-            // Send request to Tally using the URL from .env
-            $response = Http::withBody($xmlRequest, 'application/xml')
-                            ->post($this->tallyUrl);
+            $ch = curl_init();
+            curl_setopt($ch, CURLOPT_URL, $server);
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+            curl_setopt($ch, CURLOPT_TIMEOUT, 100);
+            curl_setopt($ch, CURLOPT_POST, true);
+            curl_setopt($ch, CURLOPT_POSTFIELDS, $requestXML);
+            curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
 
-            if ($response->successful()) {
-                $data = simplexml_load_string($response->body()); // Parse XML response
-                return response()->json(json_decode(json_encode($data), true)); // Convert XML to JSON response
-            } else {
-                throw new Exception('Failed to fetch data from Tally');
+            $response = curl_exec($ch);
+
+            if (curl_errno($ch)) {
+                throw new Exception(curl_error($ch));
             }
+
+            curl_close($ch);
+
+            return response()->json(['message' => 'Data inserted successfully', 'data' => $response]);
         } catch (Exception $e) {
-            // Handle any errors
             return response()->json(['error' => $e->getMessage()], 500);
         }
-
-   
     }
 
-    function insertSalesData($salesData) {
-        $xmlRequest = <<<XML
-            <ENVELOPE>
-                <HEADER>
-                    <TALLYREQUEST>Import Data</TALLYREQUEST>
-                </HEADER>
-                <BODY>
-                    <IMPORTDATA>
-                        <REQUESTDESC>
-                            <REPORTNAME>All Masters</REPORTNAME>
-                        </REQUESTDESC>
-                        <REQUESTDATA>
-                            <TALLYMESSAGE xmlns:UDF="TallyUDF">
-                                <VOUCHER VCHTYPE="Sales" ACTION="Create">
-                                    <DATE>{$salesData['date']}</DATE>
-                                    <PARTYLEDGERNAME>{$salesData['party_name']}</PARTYLEDGERNAME>
-                                    <AMOUNT>{$salesData['amount']}</AMOUNT>
-                                    <!-- Additional fields as required -->
-                                </VOUCHER>
-                            </TALLYMESSAGE>
-                        </REQUESTDATA>
-                    </IMPORTDATA>
-                </BODY>
-            </ENVELOPE>
-        XML;
-    
-        $response = Http::withBody($xmlRequest, 'application/xml')
-                        ->post(env('TALLY_SERVER_URL'));
-    
-        if ($response->successful()) {
-            return 'Data inserted successfully';
-        } else {
-            throw new \Exception('Failed to insert data into Tally');
-        }
-    }
+    // Fetch data from Tally
+    public function fetchData()
+    {
+        $requestXML = '<?xml version="1.0"?>
+        <ENVELOPE>
+          <HEADER>
+            <TALLYREQUEST>Export Data</TALLYREQUEST>
+          </HEADER>
+          <BODY>
+            <EXPORTDATA>
+              <REQUESTDESC>
+                <REPORTNAME>Ledger Vouchers</REPORTNAME>
+                <STATICVARIABLES>
+                  <SVCURRENTCOMPANY>SAVH</SVCURRENTCOMPANY>
+                  <LEDGERNAME>Bank of Maharashtra</LEDGERNAME>
+                </STATICVARIABLES>
+              </REQUESTDESC>
+            </EXPORTDATA>
+          </BODY>
+        </ENVELOPE>';
 
+        $server = 'http://localhost:9000';
+        $headers = [
+            "Content-type: text/xml",
+            "Content-length: " . strlen($requestXML),
+            "Connection: close"
+        ];
 
-    public function fetchSales() {
         try {
-            $salesData = fetchSalesData();
-            return response()->json($salesData);
-        } catch (\Exception $e) {
-            return response()->json(['error' => $e->getMessage()], 500);
-        }
-    }
+            $ch = curl_init();
+            curl_setopt($ch, CURLOPT_URL, $server);
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+            curl_setopt($ch, CURLOPT_TIMEOUT, 100);
+            curl_setopt($ch, CURLOPT_POST, true);
+            curl_setopt($ch, CURLOPT_POSTFIELDS, $requestXML);
+            curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
 
-    public function insertSales(Request $request) {
-        try {
-            $response = insertSalesData($request->all());
-            return response()->json(['message' => $response]);
-        } catch (\Exception $e) {
+            $response = curl_exec($ch);
+
+            if (curl_errno($ch)) {
+                throw new Exception(curl_error($ch));
+            }
+
+            curl_close($ch);
+
+            return response()->json(['message' => 'Data fetched successfully', 'data' => $response]);
+        } catch (Exception $e) {
             return response()->json(['error' => $e->getMessage()], 500);
         }
     }
+      
 }
